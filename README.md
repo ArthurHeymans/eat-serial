@@ -66,6 +66,14 @@ across process filter calls.
 emacs -Q --batch -L . -l eat-serial-tests.el -f ert-run-tests-batch-and-exit
 ```
 
+That command always runs the codec tests.  Integration tests for the Eat-backed
+process lifecycle run when Eat is also on `load-path`:
+
+```sh
+emacs -Q --batch -L . -L ~/src/emacs-eat -l eat-serial-tests.el \
+  -f ert-run-tests-batch-and-exit
+```
+
 To byte-compile the adapter against a local Eat checkout:
 
 ```sh

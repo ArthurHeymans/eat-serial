@@ -53,13 +53,6 @@ The format specifier %p expands to the serial port path."
   :type 'string
   :group 'eat-serial)
 
-(defcustom eat-serial-read-chunk-latency nil
-  "Reserved compatibility knob for future serial read latency tuning.
-
-When nil, Eat's normal output queue latency variables are used."
-  :type '(choice (const nil) number)
-  :group 'eat-serial)
-
 (defcustom eat-serial-break-duration 0
   "Default duration argument passed to `tcsendbreak' by `eat-serial-send-break'.
 

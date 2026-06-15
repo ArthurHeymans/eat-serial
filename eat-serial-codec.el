@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026  eat-serial contributors
 
 ;; Author: Arthur <arthur@localhost>
+;; Version: 0.1.0
 ;; Keywords: terminals, serial, processes
 ;; Package-Requires: ((emacs "30.1"))
 ;; SPDX-License-Identifier: GPL-3.0-or-later

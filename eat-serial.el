@@ -139,6 +139,31 @@ helper that opens the port path separately."
           (append mode-line-process
                   '((:eval (eat-serial--mode-line-string)))))))
 
+(defun eat-serial--display-window ()
+  "Return a window that should determine the current terminal size."
+  (or (and (eq (window-buffer) (current-buffer))
+           (selected-window))
+      (car (sort (get-buffer-window-list (current-buffer) nil t)
+                 (lambda (left right)
+                   (> (* (window-total-width left)
+                         (window-total-height left))
+                      (* (window-total-width right)
+                         (window-total-height right))))))))
+
+(defun eat-serial--resize-terminal-to-window (&rest _)
+  "Resize the Eat terminal to the window displaying this buffer."
+  (when (and eat-terminal (get-buffer-window (current-buffer) t))
+    (when-let ((window (eat-serial--display-window)))
+      (with-selected-window window
+        (let* ((width (max (window-max-chars-per-line window) 1))
+               (height (max (floor (window-screen-lines)) 1))
+               (size (eat-term-size eat-terminal)))
+          (unless (and (= width (car size))
+                       (= height (cdr size)))
+            (let ((inhibit-read-only t))
+              (eat-term-resize eat-terminal width height)
+              (eat-term-redisplay eat-terminal))))))))
+
 (defun eat-serial--set-terminal-parameter-if-bound (parameter function)
   "Set Eat terminal PARAMETER to FUNCTION if FUNCTION is defined."
   (when (and eat-terminal (fboundp function))
@@ -252,6 +277,8 @@ that must not happen for an eat-serial terminal."
   (eat-serial--delete-foreign-buffer-processes)
   (eat-serial--reset-foreign-terminal)
   (eat-serial-mode 1)
+  (add-hook 'window-configuration-change-hook
+            #'eat-serial--resize-terminal-to-window nil t)
   (eat-serial--install-mode-line)
   (setq eat-serial--port port)
   (setq eat-serial--speed speed)
@@ -284,6 +311,9 @@ that must not happen for an eat-serial terminal."
         (eat-serial-codec-make-state eat-serial-invalid-byte-policy))
   (let ((process (apply #'make-serial-process
                         (eat-serial--process-arguments))))
+    (when (fboundp 'eat--adjust-process-window-size)
+      (process-put process 'adjust-window-size-function
+                   #'eat--adjust-process-window-size))
     (setq eat-serial--process process)
     (setq eat-serial--connection-state 'connected)
     (set-marker (process-mark process) (point-max))
@@ -373,7 +403,9 @@ that must not happen for an eat-serial terminal."
       (eat-serial--setup-buffer port (or speed eat-serial-default-speed))
       (unless (eat-serial--live-process-p)
         (eat-serial--open-process)))
-    (pop-to-buffer-same-window buffer)))
+    (pop-to-buffer-same-window buffer)
+    (with-current-buffer buffer
+      (eat-serial--resize-terminal-to-window))))
 
 ;;;###autoload
 (defun eat-serial-reconnect ()

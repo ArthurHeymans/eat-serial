@@ -66,7 +66,42 @@
   (should (string=
            (eat-serial-tests--decode-chunks
             (list (unibyte-string #xc0 #xaf)))
-           "��")))
+           "��"))
+  (should (string=
+           (eat-serial-tests--decode-chunks
+            (list (unibyte-string #xe0 #x80 #x80)))
+           "���"))
+  (should (string=
+           (eat-serial-tests--decode-chunks
+            (list (unibyte-string #xf0 #x80 #x80 #x80)))
+           "����")))
+
+(ert-deftest eat-serial-codec-invalid-prefix-is-not-buffered ()
+  (dolist (chunk (list (unibyte-string #xe0 #x80)
+                       (unibyte-string #xed #xa0)
+                       (unibyte-string #xf0 #x80)
+                       (unibyte-string #xf4 #x90)))
+    (let ((state (eat-serial-codec-make-state)))
+      (should (string= (eat-serial-codec-decode state chunk) "��"))
+      (should (string= (eat-serial-codec-state-pending state) "")))))
+
+(ert-deftest eat-serial-codec-unicode-boundaries ()
+  (should (string=
+           (eat-serial-tests--decode-chunks
+            (list (unibyte-string #xf0 #x90 #x80 #x80)))
+           (char-to-string #x10000)))
+  (should (string=
+           (eat-serial-tests--decode-chunks
+            (list (unibyte-string #xf4 #x8f #xbf #xbf)))
+           (char-to-string #x10ffff)))
+  (should (string=
+           (eat-serial-tests--decode-chunks
+            (list (unibyte-string #xf4 #x90 #x80 #x80)))
+           "����"))
+  (should (string=
+           (eat-serial-tests--decode-chunks
+            (list (unibyte-string #xed #xa0 #x80)))
+           "���")))
 
 (ert-deftest eat-serial-codec-random-bytes-do-not-signal ()
   (let ((state (eat-serial-codec-make-state)))

@@ -76,6 +76,29 @@ characters are byte-sized."
   "Return non-nil when BYTE is a UTF-8 continuation byte."
   (and (<= #x80 byte) (<= byte #xbf)))
 
+(defun eat-serial-codec--valid-sequence-byte-p (lead offset byte)
+  "Return non-nil if BYTE can appear at OFFSET after UTF-8 LEAD."
+  (and (eat-serial-codec--continuation-byte-p byte)
+       (or (/= offset 1)
+           (cond
+            ((= lead #xe0) (<= #xa0 byte #xbf))
+            ((= lead #xed) (<= #x80 byte #x9f))
+            ((= lead #xf0) (<= #x90 byte #xbf))
+            ((= lead #xf4) (<= #x80 byte #x8f))
+            (t t)))))
+
+(defun eat-serial-codec--valid-prefix-p (bytes index end)
+  "Return non-nil if BYTES from INDEX to END can begin valid UTF-8."
+  (let ((lead (aref bytes index))
+        (offset 1)
+        (valid t))
+    (while (< (+ index offset) end)
+      (unless (eat-serial-codec--valid-sequence-byte-p
+               lead offset (aref bytes (+ index offset)))
+        (setq valid nil))
+      (setq offset (1+ offset)))
+    valid))
+
 (defun eat-serial-codec--invalid-byte-string (byte policy)
   "Return display text for malformed BYTE according to POLICY."
   (pcase policy
@@ -137,27 +160,20 @@ prefixes are retained in STATE and used by the next call."
                  (sequence-length (car shape))
                  (min-codepoint (cdr shape)))
             (if (< (- length index) sequence-length)
-                (let ((valid-prefix t)
-                      (offset 1))
-                  (while (< (+ index offset) length)
-                    (unless (eat-serial-codec--continuation-byte-p
-                             (aref bytes (+ index offset)))
-                      (setq valid-prefix nil))
-                    (setq offset (1+ offset)))
-                  (if valid-prefix
-                      (progn
-                        (setf (eat-serial-codec-state-pending state)
-                              (substring bytes index))
-                        (setq index length))
-                    (push (eat-serial-codec--invalid-byte-string
-                           byte policy)
-                          pieces)
-                    (setq index (1+ index))))
+                (if (eat-serial-codec--valid-prefix-p bytes index length)
+                    (progn
+                      (setf (eat-serial-codec-state-pending state)
+                            (substring bytes index))
+                      (setq index length))
+                  (push (eat-serial-codec--invalid-byte-string
+                         byte policy)
+                        pieces)
+                  (setq index (1+ index)))
               (let ((valid-continuations t)
                     (offset 1))
                 (while (< offset sequence-length)
-                  (unless (eat-serial-codec--continuation-byte-p
-                           (aref bytes (+ index offset)))
+                  (unless (eat-serial-codec--valid-sequence-byte-p
+                           byte offset (aref bytes (+ index offset)))
                     (setq valid-continuations nil))
                   (setq offset (1+ offset)))
                 (if (not valid-continuations)

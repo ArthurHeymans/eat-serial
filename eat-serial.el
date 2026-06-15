@@ -195,6 +195,8 @@ that must not happen for an eat-serial terminal."
       (when (process-live-p process)
         (message "eat-serial: deleting foreign process %s in %s"
                  (process-name process) (buffer-name))
+        (set-process-sentinel process #'ignore)
+        (set-process-buffer process nil)
         (delete-process process)))))
 
 (defun eat-serial--serial-terminal-p ()
@@ -281,10 +283,37 @@ that must not happen for an eat-serial terminal."
             #'eat-serial--resize-terminal-to-window nil t)
   (eat-serial--install-mode-line)
   (setq eat-serial--port port)
-  (setq eat-serial--speed speed)
+  (unless (eat-serial--live-process-p)
+    (setq eat-serial--speed speed))
   (setq eat-serial--codec-state
         (eat-serial-codec-make-state eat-serial-invalid-byte-policy))
   (eat-serial--ensure-terminal))
+
+(defun eat-serial--set-configuration (speed bytesize parity stopbits flowcontrol)
+  "Store serial configuration values in the current buffer."
+  (setq eat-serial--speed speed)
+  (setq eat-serial--bytesize bytesize)
+  (setq eat-serial--parity parity)
+  (setq eat-serial--stopbits stopbits)
+  (setq eat-serial--flowcontrol flowcontrol))
+
+(defun eat-serial--configure-process
+    (process speed bytesize parity stopbits flowcontrol)
+  "Apply serial configuration values to PROCESS and store them."
+  (serial-process-configure :process process
+                            :speed speed
+                            :bytesize bytesize
+                            :parity parity
+                            :stopbits stopbits
+                            :flowcontrol flowcontrol)
+  (eat-serial--set-configuration speed bytesize parity stopbits flowcontrol))
+
+(defun eat-serial--clear-process-state (&optional state)
+  "Forget the current process and set connection STATE."
+  (setq eat-serial--process nil)
+  (setq eat-serial--connection-state (or state 'disconnected))
+  (eat-serial--set-terminal-process nil)
+  (force-mode-line-update))
 
 (defun eat-serial--process-arguments ()
   "Return keyword arguments for `make-serial-process'."
@@ -306,20 +335,27 @@ that must not happen for an eat-serial terminal."
 (defun eat-serial--open-process ()
   "Open the serial process for the current buffer."
   (when (eat-serial--live-process-p)
-    (delete-process eat-serial--process))
+    (let ((old-process eat-serial--process))
+      (eat-serial--clear-process-state 'disconnected)
+      (delete-process old-process)))
   (setq eat-serial--codec-state
         (eat-serial-codec-make-state eat-serial-invalid-byte-policy))
-  (let ((process (apply #'make-serial-process
-                        (eat-serial--process-arguments))))
-    (when (fboundp 'eat--adjust-process-window-size)
-      (process-put process 'adjust-window-size-function
-                   #'eat--adjust-process-window-size))
-    (setq eat-serial--process process)
-    (setq eat-serial--connection-state 'connected)
-    (set-marker (process-mark process) (point-max))
-    (eat-serial--install-terminal-functions process)
-    (force-mode-line-update)
-    process))
+  (setq eat-serial--connection-state 'connecting)
+  (condition-case err
+      (let ((process (apply #'make-serial-process
+                            (eat-serial--process-arguments))))
+        (when (fboundp 'eat--adjust-process-window-size)
+          (process-put process 'adjust-window-size-function
+                       #'eat--adjust-process-window-size))
+        (setq eat-serial--process process)
+        (setq eat-serial--connection-state 'connected)
+        (set-marker (process-mark process) (point-max))
+        (eat-serial--install-terminal-functions process)
+        (force-mode-line-update)
+        process)
+    (error
+     (eat-serial--clear-process-state 'disconnected)
+     (signal (car err) (cdr err)))))
 
 (defun eat-serial--queue-output (process text)
   "Queue decoded TEXT from PROCESS for Eat to render."
@@ -398,10 +434,22 @@ that must not happen for an eat-serial terminal."
   (interactive
    (list (eat-serial--read-port)
          (read-number "Speed: " eat-serial-default-speed)))
-  (let ((buffer (get-buffer-create (eat-serial--buffer-name port))))
+  (let ((buffer (get-buffer-create (eat-serial--buffer-name port)))
+        (requested-speed (or speed eat-serial-default-speed)))
     (with-current-buffer buffer
-      (eat-serial--setup-buffer port (or speed eat-serial-default-speed))
-      (unless (eat-serial--live-process-p)
+      (eat-serial--setup-buffer port requested-speed)
+      (if (eat-serial--live-process-p)
+          (unless (equal eat-serial--speed requested-speed)
+            (eat-serial--configure-process eat-serial--process
+                                           requested-speed
+                                           eat-serial--bytesize
+                                           eat-serial--parity
+                                           eat-serial--stopbits
+                                           eat-serial--flowcontrol)
+            (force-mode-line-update)
+            (message "Configured %s at %s"
+                     eat-serial--port eat-serial--speed))
+        (setq eat-serial--speed requested-speed)
         (eat-serial--open-process)))
     (pop-to-buffer-same-window buffer)
     (with-current-buffer buffer
@@ -414,8 +462,6 @@ that must not happen for an eat-serial terminal."
   (unless eat-serial--port
     (user-error "This buffer is not an eat-serial buffer"))
   (eat-serial--delete-foreign-buffer-processes)
-  (when (eat-serial--live-process-p)
-    (delete-process eat-serial--process))
   (eat-serial--open-process)
   (message "Reconnected %s at %s" eat-serial--port eat-serial--speed))
 
@@ -424,12 +470,9 @@ that must not happen for an eat-serial terminal."
   "Delete the serial process without killing the current buffer."
   (interactive)
   (if (eat-serial--live-process-p)
-      (progn
-        (delete-process eat-serial--process)
-        (setq eat-serial--connection-state 'disconnected)
-        (setq eat-serial--process nil)
-        (eat-serial--set-terminal-process nil)
-        (force-mode-line-update)
+      (let ((process eat-serial--process))
+        (eat-serial--clear-process-state 'disconnected)
+        (delete-process process)
         (message "Disconnected %s" eat-serial--port))
     (message "No live eat-serial process")))
 
@@ -445,8 +488,9 @@ that must not happen for an eat-serial terminal."
 (defun eat-serial-configure (speed bytesize parity stopbits flowcontrol)
   "Configure the current serial process.
 
-SPEED, BYTESIZE, PARITY, STOPBITS, and FLOWCONTROL are passed to
-`serial-process-configure'."
+When a serial process is live, SPEED, BYTESIZE, PARITY, STOPBITS,
+and FLOWCONTROL are passed to `serial-process-configure'.  When the
+buffer is disconnected, store the settings for the next reconnect."
   (interactive
    (let ((speed (read-number "Speed: " eat-serial--speed))
          (bytesize (string-to-number
@@ -479,20 +523,18 @@ SPEED, BYTESIZE, PARITY, STOPBITS, and FLOWCONTROL are passed to
              ("hw" 'hw)
              ("sw" 'sw)
              (_ nil)))))
-  (let ((process (eat-serial--require-process)))
-    (serial-process-configure :process process
-                              :speed speed
-                              :bytesize bytesize
-                              :parity parity
-                              :stopbits stopbits
-                              :flowcontrol flowcontrol)
-    (setq eat-serial--speed speed)
-    (setq eat-serial--bytesize bytesize)
-    (setq eat-serial--parity parity)
-    (setq eat-serial--stopbits stopbits)
-    (setq eat-serial--flowcontrol flowcontrol)
+  (unless eat-serial--port
+    (user-error "This buffer is not an eat-serial buffer"))
+  (let ((process (and (eat-serial--live-process-p) eat-serial--process)))
+    (if process
+        (eat-serial--configure-process process speed bytesize parity
+                                       stopbits flowcontrol)
+      (eat-serial--set-configuration speed bytesize parity
+                                     stopbits flowcontrol))
     (force-mode-line-update)
-    (message "Configured %s at %s" eat-serial--port eat-serial--speed)))
+    (message "Configured %s at %s%s"
+             eat-serial--port eat-serial--speed
+             (if process "" " (pending reconnect)"))))
 
 (defun eat-serial--parse-byte (string)
   "Parse STRING as a byte value."

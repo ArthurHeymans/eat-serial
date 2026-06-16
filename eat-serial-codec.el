@@ -1,11 +1,13 @@
 ;;; eat-serial-codec.el --- Streaming byte codec for eat-serial -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2026  eat-serial contributors
+;; Copyright (C) 2026  Arthur Heymans
 
-;; Author: Arthur <arthur@localhost>
+;; Author: Arthur Heymans <arthur@aheymans.xyz>
+;; Maintainer: Arthur Heymans <arthur@aheymans.xyz>
 ;; Version: 0.1.0
 ;; Keywords: terminals, serial, processes
 ;; Package-Requires: ((emacs "30.1"))
+;; URL: https://github.com/ArthurHeymans/eat-serial
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:

@@ -1,5 +1,8 @@
 ;;; eat-serial-tests.el --- Tests for eat-serial -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026  Arthur Heymans
+
+;; Author: Arthur Heymans <arthur@aheymans.xyz>
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Code:

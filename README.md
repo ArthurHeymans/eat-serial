@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="image.jpg" alt="eat-serial logo" width="512">
+</p>
+
 # eat-serial
 
 `eat-serial` is an Eat-backed replacement for `serial-term`: it uses Eat's

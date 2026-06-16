@@ -46,6 +46,12 @@
                  (const emacs))
   :group 'eat-serial)
 
+(defcustom eat-serial-speed-history
+  '(9600 19200 38400 57600 115200 230400 460800 921600)
+  "Serial port speeds offered by the mode-line speed menu."
+  :type '(repeat integer)
+  :group 'eat-serial)
+
 (defcustom eat-serial-buffer-name-format "*eat-serial %p*"
   "Format used to create serial terminal buffer names.
 
@@ -120,10 +126,69 @@ helper that opens the port path separately."
 (defun eat-serial--mode-line-string ()
   "Return mode-line text for the current serial connection."
   (when eat-serial--port
-    (format " [%s %s %s]"
-            eat-serial--port
-            (or eat-serial--speed "unconfigured")
-            eat-serial--connection-state)))
+    (concat
+     " ["
+     (eat-serial--mode-line-item
+      eat-serial--port
+      "mouse-1: serial actions"
+      #'eat-serial-mode-line-connection-menu)
+     " "
+     (eat-serial--mode-line-item
+      (eat-serial--speed-string)
+      "mouse-1: change serial speed"
+      #'eat-serial-mode-line-speed-menu)
+     " "
+     (eat-serial--mode-line-item
+      (eat-serial--configuration-summary)
+      "mouse-1: change serial framing/flow control"
+      #'eat-serial-mode-line-config-menu)
+     " "
+     (eat-serial--mode-line-item
+      (symbol-name eat-serial--connection-state)
+      "mouse-1: serial actions"
+      #'eat-serial-mode-line-connection-menu)
+     "]")))
+
+(defun eat-serial--mode-line-item (text help-echo command)
+  "Return mode-line TEXT with HELP-ECHO and mouse COMMAND."
+  (propertize text
+              'help-echo help-echo
+              'mouse-face 'mode-line-highlight
+              'local-map `(keymap (mode-line keymap
+                                              (down-mouse-1 . ,command)))))
+
+(defun eat-serial--speed-string ()
+  "Return human-readable speed text for the mode line."
+  (if eat-serial--speed
+      (format "%s" eat-serial--speed)
+    "port-default"))
+
+(defun eat-serial--configuration-summary ()
+  "Return compact serial framing and flow-control summary."
+  (concat
+   (format "%s%s%s"
+           (or eat-serial--bytesize 8)
+           (pcase eat-serial--parity
+             ('odd "O")
+             ('even "E")
+             (_ "N"))
+           (or eat-serial--stopbits 1))
+   (pcase eat-serial--flowcontrol
+     ('hw "+RTS/CTS")
+     ('sw "+XON/XOFF")
+     (_ ""))))
+
+(defun eat-serial--popup-mode-line-menu (event keymap)
+  "Popup KEYMAP for mode-line EVENT and run the selected command."
+  (save-selected-window
+    (when-let ((window (and event (posn-window (event-start event)))))
+      (when (windowp window)
+        (select-window window)))
+    (let* ((selection (x-popup-menu event keymap))
+           (binding (and selection
+                         (lookup-key keymap (vconcat selection)))))
+      (when binding
+        (call-interactively binding)))))
 
 (defun eat-serial--install-mode-line ()
   "Append serial status to Eat's mode line in the current buffer."
@@ -301,6 +366,83 @@ that must not happen for an eat-serial terminal."
                             :stopbits stopbits
                             :flowcontrol flowcontrol)
   (eat-serial--set-configuration speed bytesize parity stopbits flowcontrol))
+
+(defun eat-serial--apply-configuration
+    (speed bytesize parity stopbits flowcontrol)
+  "Apply serial settings, or store them until reconnect.
+
+SPEED, BYTESIZE, PARITY, STOPBITS, and FLOWCONTROL are the same
+values accepted by `serial-process-configure'."
+  (unless eat-serial--port
+    (user-error "This buffer is not an eat-serial buffer"))
+  (let ((process (and (eat-serial--live-process-p) eat-serial--process)))
+    (if process
+        (eat-serial--configure-process process speed bytesize parity
+                                       stopbits flowcontrol)
+      (eat-serial--set-configuration speed bytesize parity
+                                     stopbits flowcontrol))
+    (force-mode-line-update)
+    (message "Configured %s as %s %s%s"
+             eat-serial--port
+             (eat-serial--speed-string)
+             (eat-serial--configuration-summary)
+             (if process "" " (pending reconnect)"))))
+
+;;;###autoload
+(defun eat-serial-set-speed (speed)
+  "Configure the current Eat serial buffer to use SPEED."
+  (interactive
+   (list (read-number "Speed: " (or eat-serial--speed
+                                      eat-serial-default-speed))))
+  (eat-serial--apply-configuration speed
+                                   eat-serial--bytesize
+                                   eat-serial--parity
+                                   eat-serial--stopbits
+                                   eat-serial--flowcontrol))
+
+(defun eat-serial-set-framing (bytesize parity stopbits)
+  "Configure serial BYTESIZE, PARITY, and STOPBITS."
+  (interactive
+   (list (string-to-number
+          (eat-serial--read-choice
+           "Byte size" '("8" "7")
+           (number-to-string (or eat-serial--bytesize 8))))
+         (pcase (eat-serial--read-choice
+                 "Parity" '("none" "odd" "even")
+                 (pcase eat-serial--parity
+                   ('odd "odd")
+                   ('even "even")
+                   (_ "none")))
+           ("odd" 'odd)
+           ("even" 'even)
+           (_ nil))
+         (string-to-number
+          (eat-serial--read-choice
+           "Stop bits" '("1" "2")
+           (number-to-string (or eat-serial--stopbits 1))))))
+  (eat-serial--apply-configuration eat-serial--speed
+                                   bytesize
+                                   parity
+                                   stopbits
+                                   eat-serial--flowcontrol))
+
+(defun eat-serial-set-flowcontrol (flowcontrol)
+  "Configure serial FLOWCONTROL."
+  (interactive
+   (list (pcase (eat-serial--read-choice
+                 "Flow control" '("none" "hw" "sw")
+                 (pcase eat-serial--flowcontrol
+                   ('hw "hw")
+                   ('sw "sw")
+                   (_ "none")))
+           ("hw" 'hw)
+           ("sw" 'sw)
+           (_ nil))))
+  (eat-serial--apply-configuration eat-serial--speed
+                                   eat-serial--bytesize
+                                   eat-serial--parity
+                                   eat-serial--stopbits
+                                   flowcontrol))
 
 (defun eat-serial--clear-process-state (&optional state)
   "Forget the current process and set connection STATE."
@@ -519,16 +661,7 @@ buffer is disconnected, store the settings for the next reconnect."
              (_ nil)))))
   (unless eat-serial--port
     (user-error "This buffer is not an eat-serial buffer"))
-  (let ((process (and (eat-serial--live-process-p) eat-serial--process)))
-    (if process
-        (eat-serial--configure-process process speed bytesize parity
-                                       stopbits flowcontrol)
-      (eat-serial--set-configuration speed bytesize parity
-                                     stopbits flowcontrol))
-    (force-mode-line-update)
-    (message "Configured %s at %s%s"
-             eat-serial--port eat-serial--speed
-             (if process "" " (pending reconnect)"))))
+  (eat-serial--apply-configuration speed bytesize parity stopbits flowcontrol))
 
 (defun eat-serial--parse-byte (string)
   "Parse STRING as a byte value."
@@ -586,6 +719,159 @@ uses a best-effort Python `termios.tcsendbreak' helper."
         (funcall eat-serial-send-break-function process duration)
       (eat-serial--python-send-break process duration))
     (message "Sent serial break on %s" eat-serial--port)))
+
+;;;###autoload
+(defun eat-serial-copy-port-name ()
+  "Copy the current serial port name to the kill ring."
+  (interactive)
+  (unless eat-serial--port
+    (user-error "This buffer is not an eat-serial buffer"))
+  (kill-new eat-serial--port)
+  (message "Copied serial port %s" eat-serial--port))
+
+(defun eat-serial--connection-menu ()
+  "Return the mode-line connection menu."
+  (let ((map (make-sparse-keymap "eat-serial")))
+    (define-key map [copy-port]
+      '(menu-item "Copy port name" eat-serial-copy-port-name
+                  :enable eat-serial--port))
+    (define-key map [send-byte]
+      '(menu-item "Send raw byte..." eat-serial-send-byte
+                  :enable (eat-serial--live-process-p)))
+    (define-key map [send-break]
+      '(menu-item "Send break" eat-serial-send-break
+                  :enable (eat-serial--live-process-p)))
+    (define-key map [separator-1] '(menu-item "--"))
+    (define-key map [configure]
+      '(menu-item "Configure..." eat-serial-configure
+                  :enable eat-serial--port))
+    (define-key map [disconnect]
+      '(menu-item "Disconnect" eat-serial-disconnect
+                  :enable (eat-serial--live-process-p)))
+    (define-key map [reconnect]
+      '(menu-item "Reconnect" eat-serial-reconnect
+                  :enable eat-serial--port))
+    map))
+
+(defun eat-serial--speed-menu ()
+  "Return the mode-line speed menu."
+  (let* ((speeds (cl-delete-duplicates
+                  (delq nil (copy-sequence
+                             (cons eat-serial--speed
+                                   eat-serial-speed-history)))
+                  :test #'equal))
+         (speeds (sort speeds #'>))
+         (map (make-sparse-keymap "Speed (b/s)")))
+    (define-key map [other]
+      '(menu-item "Other..." eat-serial-set-speed
+                  :enable eat-serial--port))
+    (define-key map [separator-1] '(menu-item "--"))
+    (dolist (speed speeds)
+      (define-key
+       map
+       (vector (make-symbol (format "speed-%s" speed)))
+       `(menu-item
+         ,(format "%s" speed)
+         (lambda ()
+           (interactive)
+           (eat-serial-set-speed ,speed))
+         :button (:radio . (equal eat-serial--speed ,speed)))))
+    map))
+
+(defun eat-serial--config-menu ()
+  "Return the mode-line serial configuration menu."
+  (let ((map (make-sparse-keymap "Serial configuration")))
+    (define-key map [configure]
+      '(menu-item "Configure all..." eat-serial-configure
+                  :enable eat-serial--port))
+    (define-key map [separator-1] '(menu-item "--"))
+    (dolist (preset '(("8N1" 8 nil 1)
+                      ("7E1" 7 even 1)
+                      ("7O1" 7 odd 1)))
+      (pcase-let ((`(,label ,bytesize ,parity ,stopbits) preset))
+        (define-key
+         map
+         (vector (make-symbol (format "preset-%s" label)))
+         `(menu-item
+           ,(format "Preset %s" label)
+           (lambda ()
+             (interactive)
+             (eat-serial-set-framing ,bytesize ',parity ,stopbits))
+           :button (:radio . (and (equal eat-serial--bytesize ,bytesize)
+                                  (eq eat-serial--parity ',parity)
+                                  (equal eat-serial--stopbits ,stopbits)))))))
+    (define-key map [separator-2] '(menu-item "--"))
+    (dolist (bytesize '(8 7))
+      (define-key
+       map
+       (vector (make-symbol (format "bytesize-%s" bytesize)))
+       `(menu-item
+         ,(format "%s data bits" bytesize)
+         (lambda ()
+           (interactive)
+           (eat-serial-set-framing ,bytesize
+                                   eat-serial--parity
+                                   eat-serial--stopbits))
+         :button (:radio . (equal eat-serial--bytesize ,bytesize)))))
+    (define-key map [separator-3] '(menu-item "--"))
+    (dolist (parity '((nil "No parity")
+                      (even "Even parity")
+                      (odd "Odd parity")))
+      (pcase-let ((`(,value ,label) parity))
+        (define-key
+         map
+         (vector (make-symbol (format "parity-%s" value)))
+         `(menu-item
+           ,label
+           (lambda ()
+             (interactive)
+             (eat-serial-set-framing eat-serial--bytesize
+                                     ',value
+                                     eat-serial--stopbits))
+           :button (:radio . (eq eat-serial--parity ',value))))))
+    (define-key map [separator-4] '(menu-item "--"))
+    (dolist (stopbits '(1 2))
+      (define-key
+       map
+       (vector (make-symbol (format "stopbits-%s" stopbits)))
+       `(menu-item
+         ,(format "%s stop bit%s" stopbits (if (= stopbits 1) "" "s"))
+         (lambda ()
+           (interactive)
+           (eat-serial-set-framing eat-serial--bytesize
+                                   eat-serial--parity
+                                   ,stopbits))
+         :button (:radio . (equal eat-serial--stopbits ,stopbits)))))
+    (define-key map [separator-5] '(menu-item "--"))
+    (dolist (flow '((nil "No flow control")
+                    (hw "Hardware flow control (RTS/CTS)")
+                    (sw "Software flow control (XON/XOFF)")))
+      (pcase-let ((`(,value ,label) flow))
+        (define-key
+         map
+         (vector (make-symbol (format "flow-%s" value)))
+         `(menu-item
+           ,label
+           (lambda ()
+             (interactive)
+             (eat-serial-set-flowcontrol ',value))
+           :button (:radio . (eq eat-serial--flowcontrol ',value))))))
+    map))
+
+(defun eat-serial-mode-line-connection-menu (event)
+  "Show the mode-line connection menu for EVENT."
+  (interactive "e")
+  (eat-serial--popup-mode-line-menu event (eat-serial--connection-menu)))
+
+(defun eat-serial-mode-line-speed-menu (event)
+  "Show the mode-line speed menu for EVENT."
+  (interactive "e")
+  (eat-serial--popup-mode-line-menu event (eat-serial--speed-menu)))
+
+(defun eat-serial-mode-line-config-menu (event)
+  "Show the mode-line configuration menu for EVENT."
+  (interactive "e")
+  (eat-serial--popup-mode-line-menu event (eat-serial--config-menu)))
 
 (provide 'eat-serial)
 

@@ -48,6 +48,11 @@ Eat mode switching keybindings are preserved:
 - `C-c M-d` — char mode
 - `C-c C-l` — line mode
 
+The mode line shows the current port, speed, serial framing, and connection
+state.  Click the port/state fields for connection actions, the speed field for
+common baud rates, or the framing field for presets such as `8N1`, `7E1`, flow
+control, and the full configure command.
+
 ## Byte handling
 
 The serial process is opened with `:coding 'no-conversion`.  Incoming raw bytes

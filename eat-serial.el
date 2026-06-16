@@ -4,7 +4,7 @@
 
 ;; Author: Arthur Heymans <arthur@aheymans.xyz>
 ;; Maintainer: Arthur Heymans <arthur@aheymans.xyz>
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Keywords: terminals, serial, processes
 ;; Package-Requires: ((emacs "30.1") (eat "0.9.4"))
 ;; URL: https://github.com/ArthurHeymans/eat-serial
@@ -12,10 +12,11 @@
 
 ;;; Commentary:
 
-;; eat-serial uses Eat's terminal renderer and input modes with an Emacs
-;; serial process backend.  Serial input is opened with `no-conversion' and
-;; decoded by `eat-serial-codec' so split UTF-8 and malformed bytes do not
-;; corrupt the terminal parser.
+;; eat-serial is an Eat-backed alternative to `serial-term'.  It uses Eat's
+;; terminal renderer and input modes with an Emacs serial process backend.
+;; Serial input is opened with `no-conversion' and decoded by
+;; `eat-serial-codec' so split UTF-8 and malformed bytes do not corrupt the
+;; terminal parser.
 
 ;;; Code:
 

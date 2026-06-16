@@ -4,7 +4,7 @@
 
 ;; Author: Arthur Heymans <arthur@aheymans.xyz>
 ;; Maintainer: Arthur Heymans <arthur@aheymans.xyz>
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Keywords: terminals, serial, processes
 ;; Package-Requires: ((emacs "30.1"))
 ;; URL: https://github.com/ArthurHeymans/eat-serial

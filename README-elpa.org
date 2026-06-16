@@ -1,0 +1,70 @@
+#+TITLE: eat-serial
+
+Copyright (C) 2026 Arthur Heymans
+
+=eat-serial= is free software under the GNU General Public License version 3
+or later.  See [[file:COPYING][COPYING]] for details.
+
+=eat-serial= is an Eat-backed alternative to =serial-term=: it uses Eat's
+terminal renderer and input modes, but connects them to =make-serial-process=
+and a byte-safe streaming UTF-8 decoder.
+
+* Requirements
+
+- Emacs 30.1 or newer with serial process support
+- Eat on =load-path=
+
+* Usage
+
+Run:
+
+#+begin_src text
+M-x eat-serial
+#+end_src
+
+The command prompts for a port and speed, creates a buffer named like
+=*eat-serial /dev/ttyUSB0*=, and starts in Eat semi-char mode by default.
+
+Useful serial commands:
+
+- =C-c C-s r= — reconnect
+- =C-c C-s d= — disconnect without killing the buffer
+- =C-c C-s c= — configure speed/byte size/parity/stop bits/flow control
+- =C-c C-s b= — send a serial break
+- =C-c C-s x= — send one raw byte
+- =C-c C-k= — disconnect
+
+Eat mode switching keybindings are preserved:
+
+- =C-c C-e= — Emacs mode from semi-char/line
+- =C-c C-j= — semi-char mode
+- =C-c M-d= — char mode
+- =C-c C-l= — line mode
+
+The mode line shows the current port, speed, serial framing, and connection
+state.  Click the port/state fields for connection actions, the speed field for
+common baud rates, or the framing field for presets such as =8N1=, =7E1=, flow
+control, and the full configure command.
+
+* Byte handling
+
+The serial process is opened with =:coding 'no-conversion=.  Incoming raw bytes
+are decoded by =eat-serial-codec= before they are passed to Eat.
+
+Customizable behavior:
+
+- =eat-serial-default-speed= (default =115200=)
+- =eat-serial-default-coding-system= (default =utf-8-unix= for input sent to the device)
+- =eat-serial-invalid-byte-policy= (=replacement=, =hex=, or =latin-1=)
+- =eat-serial-default-input-mode= (=semi-char=, =char=, =line=, or =emacs=)
+- =eat-serial-buffer-name-format=
+
+Malformed bytes never signal an error.  Split UTF-8 sequences are buffered
+across process filter calls.
+
+* Serial break support
+
+Emacs does not expose a portable Lisp primitive for serial break.  By default,
+=eat-serial-send-break= uses a best-effort Python =termios.tcsendbreak= helper
+that opens the same port path separately.  Customize
+=eat-serial-send-break-function= if your platform needs a different mechanism.
